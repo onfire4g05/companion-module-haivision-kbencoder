@@ -5,7 +5,7 @@ var debug;
 var log;
 
 function instance(system, id, config) {
-	var self = this;
+	let self = this;
 
 	// super-constructor
 	instance_skel.apply(this, arguments);
@@ -16,10 +16,54 @@ function instance(system, id, config) {
 };
 
 instance.prototype.sessionId = null;
+instance.prototype.deviceId = null;
 instance.prototype.polling = null;
 
 instance.prototype.channels = [];
-instance.prototype.channels_list = [];
+instance.prototype.channels_list = [{id: 'null', label: '(no channels found)'}];
+
+instance.prototype.Variables = [
+	{
+		label: 'Current Software Version',
+		name: 'current_version'
+	},
+	{
+		label: 'Current CPU Usage',
+		name: 'current_cpu_usage'
+	},
+	{
+		label: 'Current Memory Usage',
+		name: 'current_mem_usage'
+	},
+	{
+		label: 'Free Disk Space (GB)',
+		name: 'free_disk_space'
+	},
+	{
+		label: 'Total Disk Space (GB)',
+		name: 'total_disk_space'
+	},
+	{
+		label: 'Used Disk Space (Percent)',
+		name: 'used_disk_space'
+	},
+	{
+		label: 'Device Name',
+		name: 'device_name'
+	},
+	{
+		label: 'Uptime (Hours)',
+		name: 'uptime'
+	},
+	{
+		label: 'Network Incoming',
+		name: 'network_incoming'
+	},
+	{
+		label: 'Network Outgoing',
+		name: 'network_outgoing'
+	}
+];
 
 /**
  * Config updated by the user.
@@ -28,7 +72,7 @@ instance.prototype.updateConfig = function(config) {
 	let self = this;
 	self.config = config;
 	clearInterval(self.polling);
-	self.init_variables();
+	
 	self.init_login();
 };
 
@@ -38,61 +82,72 @@ instance.prototype.updateConfig = function(config) {
 instance.prototype.init = function() {
 	let self = this;
 
+	self.request = require('request');
+
 	self.init_variables();
+	self.init_feedbacks();
 	self.init_login();
 };
 
 instance.prototype.init_variables = function() {
 	let self = this;
 
-	self.setVariableDefinitions(
-		[
-			{
-				label: 'Current CPU Usage',
-				name: 'current_cpu_usage'
-			},
-			{
-				label: 'Current Memory Usage',
-				name: 'current_mem_usage'
-			},
-			{
-				label: 'Free Disk Space (GB)',
-				name: 'free_disk_space'
-			},
-			{
-				label: 'System Memory Usage',
-				name: 'system_mem_usage'
-			},
-			{
-				label: 'System Memory Usage (Percent)',
-				name: 'system_mem_usage_percent'
-			},
-			{
-				label: 'System Total Memory',
-				name: 'system_total_memory'
-			},
-			{
-				label: 'Total Disk Space (GB)',
-				name: 'total_disk_space'
-			},
-			{
-				label: 'Used Disk Space (Percent)',
-				name: 'used_disk_space'
-			},
-			{
-				label: 'Encoder Label',
-				name: 'encoder_label'
-			},
-			{
-				label: 'Encoder Uptime (Hours)',
-				name: 'encocder_uptime'
-			}
-		]
-	);
+	self.setVariableDefinitions(self.Variables);
 };
 
+instance.prototype.init_feedbacks = function () {
+	let self = this;
+
+	// feedbacks
+	let feedbacks = {};
+
+	feedbacks['state'] = {
+		label: 'Change Button Color If Channel is in Running State',
+		description: 'If selected channel is in running state, set the button to this color.',
+		options: [
+			{
+				type: 'dropdown',
+				label: 'Channel',
+				id: 'channel',
+				choices: self.channels_list
+			},
+			{
+				type: 'colorpicker',
+				label: 'Foreground Color',
+				id: 'fg',
+				default: self.rgb(0,0,0)
+			},
+			{
+				type: 'colorpicker',
+				label: 'Background Color',
+				id: 'bg',
+				default: self.rgb(0,255,0)
+			}
+		]
+	};
+
+	self.setFeedbackDefinitions(feedbacks);
+};
+
+instance.prototype.feedback = function(feedback, bank) {
+	let self = this;
+	
+	if (feedback.type === 'state') {
+		for (let i = 0; i < self.channels.length; i++) {
+			if (self.channels[i].id === feedback.options.channel) {
+				if (self.channels[i].state === 'running') {
+					return { color: feedback.options.fg, bgcolor: feedback.options.bg };
+				}
+			}
+		}
+	}
+
+	return {};
+};
+
+
 instance.prototype.init_login = function() {
-	var self = this;
+	let self = this;
 
 	if ((self.config.username !== '') && (self.config.password !== '')) {
 		//username and password not blank, so initiate login session
@@ -101,144 +156,198 @@ instance.prototype.init_login = function() {
 			"password": self.config.password
 		}
 
-		let cmd = '/ecs/auth.json';
-		self.postRest(cmd, body).then(function(result) {
+		let cmd = '/api/session';
+		let url = self.makeUrl(cmd);
+		self.request.post({ url: url, json: body, rejectUnauthorized: false}, function (error, response, body) {
 			// Success
-			self.status(self.STATUS_OK);
-			let resultdata = JSON.parse(result.data.toString());
-			self.sessionId = resultdata['sessionid'];
-
-			self.polling = setInterval(() => {
-				self.get_variables();
-			}, 10000); //10 seconds
-		}).catch(function(message) {
 			self.sessionId = null;
-			self.status(self.STATUS_ERROR);
-			self.log('error', self.config.host + ' : ' + message);
+
+			let cookies = response.headers['set-cookie'];
+			try {
+				let cookiesString = cookies.toString();
+				let cookiesArray = cookiesString.split(';');
+				
+				for (let i = 0; i < cookiesArray.length; i++) {
+					if (cookiesArray[i].indexOf('sessionID=') > -1) {
+						//this is the session id that we want
+						let values = cookiesArray[i].split('=');
+						self.sessionId = values[1];
+						break;
+					}
+				}
+
+				if (self.sessionId !== null) {
+					self.status(self.STATUS_OK);
+					self.log('info', 'Session authenticated. Session ID: ' + self.sessionId);
+
+					self.get_variables();
+		
+					self.polling = setInterval(() => {
+						self.get_variables();
+					}, 1000); //1 second
+				}
+				else {
+					self.status(self.STATUS_ERROR);
+					self.log('error', 'Login error: Session ID not returned.');
+				}
+			}
+			catch (error) {
+				self.status(self.STATUS_ERROR);
+				self.log('error', 'Login error parsing cookies: ' + error);
+			}	
 		});
 	}
 };
 
-instance.prototype.get_variables = function() {
-	// GET /ecs.json
-	/*
-	encoder.CurrentCpuUsage
-	encoder.CurrentMemUsage
-	encoder.FreeDiskSpaceGB
-	encoder.SystemMemUsage
-	encoder.SystemMemUsagePercent
-	encoder.SystemTotalMemory
-	encoder.TotalDiskSpaceGB
-	encoder.UsedDiskSpacePercent
-	encoder.channels
-		event_id
-		event_label
-		id
-		label
-		outoforder
-		port
-		startcounter
-	encoder.label
-	encoder.uptime.hours
-	*/
+instance.prototype.getTime = function() {
+	var d = new Date();
+	var milliseconds = d.getTime();
 
+	return milliseconds;
+};
+
+instance.prototype.get_variables = function() {
 	let self = this;
 
-	let cmd = '/ecs.json';
-	self.getRest(cmd, {}).then(function(result) {
-		// Success
-		//process the data
-		self.status(self.STATUS_OK);
-		let data = JSON.parse(result.data.toString());
+	let cmd, url, cookieJarAuth, cookie1;
 
-		self.setVariable('current_cpu_usage', data['CurrentCpuUsage']);
-		self.setVariable('current_mem_usage', data['CurrentMemUsage']);
-		self.setVariable('free_disk_space', data['FreeDiskSpaceGB']);
-		self.setVariable('system_mem_usage', data['SystemMemUsage']);
-		self.setVariable('system_mem_usage_percent', data['SystemMemUsagePercent']);
-		self.setVariable('system_total_memory', data['SystemTotalMemory']);
-		self.setVariable('total_disk_space', data['TotalDiskSpaceGB']);
-		self.setVariable('used_disk_space', data['UsedDiskSpacePercent']);
-		self.setVariable('encoder_label', data['label']);
-		self.setVariable('encoder_uptime', data['uptime']['hours']);
+	//Get System Level Information
+	cmd = '/api/system?_=' + self.getTime();
+	url = self.makeUrl(cmd);
+	cookieJarAuth = self.request.jar();
+	cookie1 = self.request.cookie('sessionID=' + self.sessionId);
+	cookieJarAuth.setCookie(cookie1, url);
+
+	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
+		let data = JSON.parse(body);
+
+		self.setVariable('current_version', data.version.release + ' Build ' + data.version.build);
+		self.setVariable('uptime', `${data.uptime.days}d${data.uptime.hrs}h${data.uptime.mins}m${data.uptime.secs}s`);
+	});	
+
+	//Get Device Information
+	cmd = '/api/devices?_=' + self.getTime();
+	url = self.makeUrl(cmd);
+	cookieJarAuth = self.request.jar();
+	cookie1 = self.request.cookie('sessionID=' + self.sessionId);
+	cookieJarAuth.setCookie(cookie1, url);
+
+	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
+		let data = JSON.parse(body);
+
+		self.deviceId = data[0]['_id'];
+		self.setVariable('device_name', data[0].name);
+
+		self.get_channels(self.deviceId);
+		self.get_statistics(self.deviceId);
+	});	
+};
+
+instance.prototype.get_channels = function(deviceId) {
+	let self = this;
+
+	let cmd, url, cookieJarAuth, cookie1;
+
+	cmd = `/api/kulabyte/${deviceId}/channels?_=${self.getTime()}`;
+	url = self.makeUrl(cmd);
+	cookieJarAuth = self.request.jar();
+	cookie1 = self.request.cookie('sessionID=' + self.sessionId);
+	cookieJarAuth.setCookie(cookie1, url);
+
+	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
+		let data = JSON.parse(body);
 
 		self.channels = [];
-		self.channels_list = [];
 
-		for (let i = 0; i < data['channels'].length; i++) {
-			self.channels.push(data['channels'][i]);
+		self.channels_list = [{id: 'null', label: '(select a channel)'}];
+
+		for (let i = 0; i < data.length; i++) {
+			let channelObj = {};
+			channelObj.id = data[i]['_id'];
+			channelObj.name = data[i].name;
+			channelObj.recordingArmed = ((data[i].recording === 'active') ? true : false);
+			channelObj.state = data[i].state;
+			self.channels.push(channelObj);
+
 			let channelListObj = {};
-			channelListObj.id = data['channels'][i].label;
-			channelListObj.label = data['channels'][i].label;
+			channelListObj.id = data[i]['_id'];
+			channelListObj.label = unescape(data[i].name);
 			self.channels_list.push(channelListObj);
 
-			self.get_channel_state(data['channels'][i].label);
+			let foundStateVariable = false;
+			let channel_name = unescape(data[i]['_name']).replace(' ', '_');
+
+			for (let i = 0; i < self.Variables.length; i++) {
+				if (self.Variables[i].name === 'state_' + channel_name) {
+					foundStateVariable = true;
+				}
+			}
+
+			if (!foundStateVariable) {
+				let variableObj = {};
+				variableObj.name = 'state_' + channel_name;
+				self.Variables.push(variableObj);
+			}
+			
+			if (!foundStateVariable) {
+				//only set the variable definitions again if we added a new variable, this should cut down on unneccessary requests
+				self.setVariableDefinitions(self.Variables);
+			}
+
+			self.setVariable('state_' + channel_name, data[i].state);
+			self.checkFeedbacks('state');
 		}
 
 		self.actions(); //republish list of actions because of new channel data
-	}).catch(function(message) {
-		clearInterval(self.polling);
-		self.status(self.STATUS_ERROR);
-		self.log('error', self.config.host + ' : ' + message);
-	});
-}
-
-instance.prototype.get_channel_state = function(channel_id) {
-	/*
-	GET /ecs/channels/<channel_id>.json
-	channel.state (running)
-	*/
-
-	let self = this;
-
-	let cmd = `/ecs/channels/${channel_id}.json`;
-	self.getRest(cmd, {}).then(function(result) {
-		// Success
-		let data = JSON.parse(result.data.toString());
-		self.setVariable(channel_id + '_state', data['channel']['state']);
-	}).catch(function(message) {
-		self.status(self.STATUS_ERROR);
-		self.log('error', self.config.host + ' : ' + message);
+		self.init_feedbacks(); //republish list of feedbacks because of new channel data
 	});
 };
 
-instance.prototype.control_channel = function(channel_id, command, param) {
+instance.prototype.get_statistics = function(deviceId) {
 	let self = this;
 
-	/*
-	StartChannel
-	StartChannel param "startrecord"
-	StopChannel
-	PrepareStop
-	StartRecord
-	StopRecord
-	*/
+	let cmd, url, cookieJarAuth, cookie1;
 
-	let cmd = `/ecs/channels/${channel_id}.json`;
-	let body = {
-		"invoke":
-		{
-			"command": command,
-			"param": param
-		}
-	}
+	cmd = `/api/kulabyte/${deviceId}/encoder/statistics?_=${self.getTime()}`;
+	url = self.makeUrl(cmd);
+	cookieJarAuth = self.request.jar();
+	cookie1 = self.request.cookie('sessionID=' + self.sessionId);
+	cookieJarAuth.setCookie(cookie1, url);
 
-	self.putRest(cmd, body).then(function(result) {
-		let data = JSON.parse(result.data.toString());
-		let message = data['messages'][0]['text'];
-		self.log('info', message);
-	}).catch(function(message) {
-		self.status(self.STATUS_ERROR);
-		self.log('error', self.config.host + ' : ' + message);
+	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
+		let data = JSON.parse(body);
+
+		self.setVariable('current_cpu_usage', data.cpu);
+		self.setVariable('current_mem_usage', data.memory);
+		self.setVariable('free_disk_space', data.diskSpace.free);
+		self.setVariable('total_disk_space', data.diskSpace.total);
+		self.setVariable('used_disk_space', data.diskSpace.usedPercent);
+		self.setVariable('network_incoming', data.network.incoming);
+		self.setVariable('network_outgoing', data.network.outgoing);
 	});
 };
 
+instance.prototype.control_channel = function(channelId, command) {
+	let self = this;
+
+	let cmd, url, cookieJarAuth, cookie1;
+
+	cmd = `/api/kulabyte/${self.deviceId}/channels/${channelId}/${command}`;
+	url = self.makeUrl(cmd);
+	cookieJarAuth = self.request.jar();
+	cookie1 = self.request.cookie('sessionID=' + self.sessionId);
+	cookieJarAuth.setCookie(cookie1, url);
+
+	self.request.post({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
+		let data = JSON.parse(body);
+	});
+};
 
 /**
  * Return config fields for web config.
  */
 instance.prototype.config_fields = function() {
-	var self = this;
+	let self = this;
 
 	return [
 		{
@@ -246,7 +355,7 @@ instance.prototype.config_fields = function() {
 			id: 'info',
 			width: 12,
 			label: 'Information',
-			value: 'This module will control a Haivision KB Encoder.'
+			value: 'This module will control a Haivision KB Encoder using the web API.'
 		},
 		{
 			type: 'textinput',
@@ -276,8 +385,8 @@ instance.prototype.config_fields = function() {
  * Cleanup when the module gets deleted.
  */
 instance.prototype.destroy = function() {
-	var self = this;
-	debug("destroy");
+	let self = this;
+	self.debug("destroy");
 };
 
 
@@ -285,11 +394,11 @@ instance.prototype.destroy = function() {
  * Populates the supported actions.
  */
 instance.prototype.actions = function(system) {
-	var self = this;
+	let self = this;
 
 	self.setActions({
-		'start_streaming': {
-			label: 'Start Streaming',
+		'start_channel': {
+			label: 'Start a Channel',
 			options: [
 				{
 					type: 'dropdown',
@@ -299,8 +408,8 @@ instance.prototype.actions = function(system) {
 				}
 			]
 		},
-		'stop_streaming': {
-			label: 'Stop Streaming',
+		'stop_channel': {
+			label: 'Stop a Channel',
 			options: [
 				{
 					type: 'dropdown',
@@ -310,8 +419,8 @@ instance.prototype.actions = function(system) {
 				}
 			]
 		},
-		'start_recording': {
-			label: 'Start Recording',
+		'arm_recording': {
+			label: 'Arm Recording',
 			options: [
 				{
 					type: 'dropdown',
@@ -321,8 +430,8 @@ instance.prototype.actions = function(system) {
 				}
 			]
 		},
-		'stop_recording': {
-			label: 'Stop Recording',
+		'disarm_recording': {
+			label: 'Disarm Recording',
 			options: [
 				{
 					type: 'dropdown',
@@ -335,96 +444,6 @@ instance.prototype.actions = function(system) {
 
 	});
 };
-
-
-instance.prototype.getRest = function(cmd, body) {
-	var self = this;
-	return self.doRest('GET', cmd, body);
-};
-
-instance.prototype.postRest = function(cmd, body) {
-	var self = this;
-	return self.doRest('POST', cmd, body);
-};
-
-instance.prototype.putRest = function(cmd, body) {
-	var self = this;
-	return self.doRest('PUT', cmd, body);
-};
-
-/**
- * Performs the REST command, either GET, POST, or PUT.
- *
- * @param method        Either GET, POST, or PUT
- * @param cmd           The command to execute
- * @param body          If POST or PUT, an object containing the body
- */
-instance.prototype.doRest = function(method, cmd, body) {
-	var self = this;
-	var url  = self.makeUrl(cmd);
-
-	return new Promise(function(resolve, reject) {
-
-		function handleResponse(err, result) {
-			if (err === null && typeof result === 'object' && result.response.statusCode === 200) {
-				// A successful response
-				resolve(result);
-			} else {
-				// Failure. Reject the promise.
-				var message = 'Unknown error';
-
-				if (result !== undefined) {
-					if (result.response !== undefined) {
-						message = result.response.statusCode + ': ' + result.response.statusMessage;
-					} else if (result.error !== undefined) {
-						// Get the error message from the object if present.
-						message = result.error.code +': ' + result.error.message;
-					}
-				}
-
-				reject(message);
-			}
-		}
-
-		let headers = {};
-
-		if (self.sessionId !== null) {
-			headers['Authorization'] = self.sessionId;
-		}
-
-		let extra_args = {};
-
-		switch(method) {
-			case 'POST':
-				self.system.emit('rest', url, body, function(err, result) {
-						handleResponse(err, result);
-					}, headers, extra_args
-				);
-				break;
-
-			case 'GET':
-				self.system.emit('rest_get', url, function(err, result) {
-						handleResponse(err, result);
-					}, headers, extra_args
-				);
-				break;
-
-			case 'PUT':
-				self.system.emit('rest_put', url, function(err, result) {
-						handleResponse(err, result);
-					}, headers, extra_args
-				);
-				break;
-
-			default:
-				throw new Error('Invalid method');
-
-		}
-
-	});
-
-};
-
 
 /**
  * Runs the specified action.
@@ -432,27 +451,27 @@ instance.prototype.doRest = function(method, cmd, body) {
  * @param action
  */
 instance.prototype.action = function(action) {
-	var self = this;
-	var opt = action.options;
+	let self = this;
+	let opt = action.options;
 
 	try {
 		switch (action.action) {
-			case 'start_streaming':
-				self.control_channel(opt.channel, 'StartChannel', '');
+			case 'start_channel':
+				self.control_channel(opt.channel, 'start');
 				break;
-			case 'stop_streaming':
-				self.control_channel(opt.channel, 'StopChannel', '');
+			case 'stop_channel':
+				self.control_channel(opt.channel, 'stop');
 				break;
-			case 'start_recording':
-				self.control_channel(opt.channel, 'StartRecord', '');
+			case 'arm_recording':
+				self.control_channel(opt.channel, 'recording/start');
 				break;
-			case 'stop_recording':
-				self.control_channel(opt.channel, 'StopRecord', '');
+			case 'disarm_recording':
+				self.control_channel(opt.channel, 'recording/stop');
 				break;
 		}
 
 	} catch (err) {
-		self.log('error', err.message);
+		self.log('error', 'Error Executing Action: ' + err.message);
 	}
 };
 
@@ -462,13 +481,13 @@ instance.prototype.action = function(action) {
  * @param cmd           Must start with a /
  */
 instance.prototype.makeUrl = function(cmd) {
-	var self = this;
+	let self = this;
 
 	if (cmd[0] !== '/') {
 		throw new Error('cmd must start with a /');
 	}
 
-	return 'http://' + self.config.host + cmd;
+	return 'https://' + self.config.host + cmd;
 };
 
 instance_skel.extendedBy(instance);
