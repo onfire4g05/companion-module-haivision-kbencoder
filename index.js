@@ -72,6 +72,7 @@ instance.prototype.updateConfig = function(config) {
 	let self = this;
 	self.config = config;
 	clearInterval(self.polling);
+	clearInterval(self.polling_login);
 	
 	self.init_login();
 };
@@ -149,53 +150,60 @@ instance.prototype.feedback = function(feedback, bank) {
 instance.prototype.init_login = function() {
 	let self = this;
 
-	if ((self.config.username !== '') && (self.config.password !== '')) {
-		//username and password not blank, so initiate login session
-		let body = {
-			"username": self.config.username,
-			"password": self.config.password
-		}
-
-		let cmd = '/api/session';
-		let url = self.makeUrl(cmd);
-		self.request.post({ url: url, json: body, rejectUnauthorized: false}, function (error, response, body) {
-			// Success
-			self.sessionId = null;
-
-			let cookies = response.headers['set-cookie'];
-			try {
-				let cookiesString = cookies.toString();
-				let cookiesArray = cookiesString.split(';');
-				
-				for (let i = 0; i < cookiesArray.length; i++) {
-					if (cookiesArray[i].indexOf('sessionID=') > -1) {
-						//this is the session id that we want
-						let values = cookiesArray[i].split('=');
-						self.sessionId = values[1];
-						break;
+	if ((self.config.username) && (self.config.password)) {
+		if ((self.config.username !== '') && (self.config.password !== '')) {
+			//username and password not blank, so initiate login session
+			let body = {
+				"username": self.config.username,
+				"password": self.config.password
+			}
+	
+			let cmd = '/api/session';
+			let url = self.makeUrl(cmd);
+			self.request.post({ url: url, json: body, rejectUnauthorized: false}, function (error, response, body) {
+				// Success
+				self.sessionId = null;
+	
+				try {
+					let cookies = response.headers['set-cookie'];
+					let cookiesString = cookies.toString();
+					let cookiesArray = cookiesString.split(';');
+					
+					for (let i = 0; i < cookiesArray.length; i++) {
+						if (cookiesArray[i].indexOf('sessionID=') > -1) {
+							//this is the session id that we want
+							let values = cookiesArray[i].split('=');
+							self.sessionId = values[1];
+							break;
+						}
+					}
+	
+					if (self.sessionId !== null) {
+						self.status(self.STATUS_OK);
+						self.log('info', 'Session authenticated. Session ID: ' + self.sessionId);
+	
+						self.get_variables();
+			
+						self.polling = setInterval(() => {
+							self.get_variables();
+						}, 1000); //1 second
+	
+						self.polling_login = setTimeout(() => {
+							self.log('info', 'Reauthenticating Login Session.');
+							self.init_login();
+						}, 1200000) //20 minutes
+					}
+					else {
+						self.status(self.STATUS_ERROR);
+						self.log('error', 'Login error: Session ID not returned.');
 					}
 				}
-
-				if (self.sessionId !== null) {
-					self.status(self.STATUS_OK);
-					self.log('info', 'Session authenticated. Session ID: ' + self.sessionId);
-
-					self.get_variables();
-		
-					self.polling = setInterval(() => {
-						self.get_variables();
-					}, 1000); //1 second
-				}
-				else {
+				catch (error) {
 					self.status(self.STATUS_ERROR);
-					self.log('error', 'Login error: Session ID not returned.');
-				}
-			}
-			catch (error) {
-				self.status(self.STATUS_ERROR);
-				self.log('error', 'Login error parsing cookies: ' + error);
-			}	
-		});
+					self.log('error', 'Login error parsing cookies: ' + error);
+				}	
+			});
+		}
 	}
 };
 
@@ -257,22 +265,33 @@ instance.prototype.get_channels = function(deviceId) {
 	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false}, function (error, response, body) {
 		let data = JSON.parse(body);
 
-		self.channels = [];
-
-		self.channels_list = [{id: 'null', label: '(select a channel)'}];
+		let newChannels = false;
 
 		for (let i = 0; i < data.length; i++) {
-			let channelObj = {};
-			channelObj.id = data[i]['_id'];
-			channelObj.name = data[i].name;
-			channelObj.recordingArmed = ((data[i].recording === 'active') ? true : false);
-			channelObj.state = data[i].state;
-			self.channels.push(channelObj);
+			const found = self.channels_list.some(el => el.id === data[i]['_id']);
+			if (!found) {
+				let channelObj = {};
+				channelObj.id = data[i]['_id'];
+				channelObj.name = data[i].name;
+				channelObj.recordingArmed = ((data[i].recording === 'active') ? true : false);
+				channelObj.state = data[i].state;
+				self.channels.push(channelObj);
 
-			let channelListObj = {};
-			channelListObj.id = data[i]['_id'];
-			channelListObj.label = unescape(data[i].name);
-			self.channels_list.push(channelListObj);
+				let channelListObj = {};
+				channelListObj.id = data[i]['_id'];
+				channelListObj.label = unescape(data[i].name);
+				self.channels_list.push(channelListObj);
+
+				newChannels = true; //set the bool to true so we can later update actions/feedbacks list
+			}
+			else {
+				//update the channel state
+				let index = self.channels.findIndex(obj => obj.id == data[i]['_id']);
+
+				self.channels[index].name = data[i].name;
+				self.channels[index].recordingArmed = ((data[i].recording === 'active') ? true : false);
+				self.channels[index].state = data[i].state;
+			}
 
 			let foundStateVariable = false;
 			let channel_name = unescape(data[i]['_name']).replace(' ', '_');
@@ -298,8 +317,10 @@ instance.prototype.get_channels = function(deviceId) {
 			self.checkFeedbacks('state');
 		}
 
-		self.actions(); //republish list of actions because of new channel data
-		self.init_feedbacks(); //republish list of feedbacks because of new channel data
+		if (newChannels) {
+			self.actions(); //republish list of actions because of new channel data
+			self.init_feedbacks(); //republish list of feedbacks because of new channel data
+		}
 	});
 };
 
@@ -368,13 +389,15 @@ instance.prototype.config_fields = function() {
 			type: 'textinput',
 			id: 'username',
 			label: 'Username',
-			width: 4
+			width: 4,
+			default: ''
 		},
 		{
 			type: 'textinput',
 			id: 'password',
 			label: 'Password',
-			width: 4
+			width: 4,
+			default: ''
 		}
 	];
 
@@ -386,6 +409,8 @@ instance.prototype.config_fields = function() {
  */
 instance.prototype.destroy = function() {
 	let self = this;
+	clearInterval(self.polling);
+	clearInterval(self.polling_login);
 	self.debug("destroy");
 };
 
@@ -418,6 +443,12 @@ instance.prototype.actions = function(system) {
 					choices: self.channels_list
 				}
 			]
+		},
+		'start_channel_all': {
+			label: 'Start All Channels'
+		},
+		'stop_channel_all': {
+			label: 'Stop All Channels'
 		},
 		'arm_recording': {
 			label: 'Arm Recording',
@@ -461,6 +492,16 @@ instance.prototype.action = function(action) {
 				break;
 			case 'stop_channel':
 				self.control_channel(opt.channel, 'stop');
+				break;
+			case 'start_channel_all':
+				for (let i = 0; i < self.channels_list.length; i++) {
+					self.control_channel(self.channels_list[i].id, 'start');
+				}
+				break;
+			case 'stop_channel_stop':
+				for (let i = 0; i < self.channels_list.length; i++) {
+					self.control_channel(self.channels_list[i].id, 'stop');
+				}
 				break;
 			case 'arm_recording':
 				self.control_channel(opt.channel, 'recording/start');
