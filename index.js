@@ -498,7 +498,7 @@ instance.prototype.action = function(action) {
 					self.control_channel(self.channels_list[i].id, 'start');
 				}
 				break;
-			case 'stop_channel_stop':
+			case 'stop_channel_all':
 				for (let i = 0; i < self.channels_list.length; i++) {
 					self.control_channel(self.channels_list[i].id, 'stop');
 				}
