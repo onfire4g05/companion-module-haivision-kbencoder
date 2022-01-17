@@ -238,13 +238,17 @@ instance.prototype.get_variables = function () {
 	cookieJarAuth.setCookie(cookie1, url)
 
 	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false }, function (error, response, body) {
-		let data = JSON.parse(body)
+		try {
+			let data = JSON.parse(body)
 
-		self.deviceId = data[0]['_id']
-		self.setVariable('device_name', data[0].name)
+			self.deviceId = data[0]['_id']
+			self.setVariable('device_name', data[0].name)
 
-		self.get_channels(self.deviceId)
-		self.get_statistics(self.deviceId)
+			self.get_channels(self.deviceId)
+			self.get_statistics(self.deviceId)
+		} catch (e) {
+			debug(e)
+		}
 	})
 }
 
