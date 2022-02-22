@@ -1,8 +1,6 @@
 // Haivision KB Encoder
 
 var instance_skel = require('../../instance_skel')
-var debug
-var log
 
 function instance(system, id, config) {
 	let self = this
@@ -224,10 +222,19 @@ instance.prototype.get_variables = function () {
 	cookieJarAuth.setCookie(cookie1, url)
 
 	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false }, function (error, response, body) {
-		let data = JSON.parse(body)
+		try {
+			let data = JSON.parse(body)
 
-		self.setVariable('current_version', data.version.release + ' Build ' + data.version.build)
-		self.setVariable('uptime', `${data.uptime.days}d${data.uptime.hrs}h${data.uptime.mins}m${data.uptime.secs}s`)
+			if (data.version) {
+				self.setVariable('current_version', data.version.release + ' Build ' + data.version.build)
+			}
+
+			if (data.uptime) {
+				self.setVariable('uptime', `${data.uptime.days}d${data.uptime.hrs}h${data.uptime.mins}m${data.uptime.secs}s`)
+			}
+		} catch(e) {
+			self.debug(e)
+		}
 	})
 
 	//Get Device Information
@@ -241,13 +248,15 @@ instance.prototype.get_variables = function () {
 		try {
 			let data = JSON.parse(body)
 
-			self.deviceId = data[0]['_id']
-			self.setVariable('device_name', data[0].name)
+			if (data[0]) {
+				self.deviceId = data[0]['_id']
+				self.setVariable('device_name', data[0].name)
 
-			self.get_channels(self.deviceId)
-			self.get_statistics(self.deviceId)
+				self.get_channels(self.deviceId)
+				self.get_statistics(self.deviceId)
+			}
 		} catch (e) {
-			debug(e)
+			self.debug(e)
 		}
 	})
 }
@@ -264,62 +273,73 @@ instance.prototype.get_channels = function (deviceId) {
 	cookieJarAuth.setCookie(cookie1, url)
 
 	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false }, function (error, response, body) {
-		let data = JSON.parse(body)
+		try {
+			let data = JSON.parse(body)
 
-		let newChannels = false
+			let newChannels = false
 
-		for (let i = 0; i < data.length; i++) {
-			const found = self.channels_list.some((el) => el.id === data[i]['_id'])
-			if (!found) {
-				let channelObj = {}
-				channelObj.id = data[i]['_id']
-				channelObj.name = data[i].name
-				channelObj.recordingArmed = data[i].recording === 'active' ? true : false
-				channelObj.state = data[i].state
-				self.channels.push(channelObj)
+			for (let i = 0; i < data.length; i++) {
+				if (data[i]) {
+					const found = self.channels_list.some((el) => el.id === data[i]['_id'])
+					if (!found) {
+						let channelObj = {}
+						channelObj.id = data[i]['_id']
+						channelObj.name = data[i].name
+						channelObj.recordingArmed = data[i].recording === 'active' ? true : false
+						channelObj.state = data[i].state
+						self.channels.push(channelObj)
 
-				let channelListObj = {}
-				channelListObj.id = data[i]['_id']
-				channelListObj.label = unescape(data[i].name)
-				self.channels_list.push(channelListObj)
+						let channelListObj = {}
+						channelListObj.id = data[i]['_id']
+						channelListObj.label = unescape(data[i].name)
+						self.channels_list.push(channelListObj)
 
-				newChannels = true //set the bool to true so we can later update actions/feedbacks list
-			} else {
-				//update the channel state
-				let index = self.channels.findIndex((obj) => obj.id == data[i]['_id'])
+						newChannels = true //set the bool to true so we can later update actions/feedbacks list
+					} else {
+						//update the channel state
+						let index = self.channels.findIndex((obj) => obj.id == data[i]['_id'])
 
-				self.channels[index].name = data[i].name
-				self.channels[index].recordingArmed = data[i].recording === 'active' ? true : false
-				self.channels[index].state = data[i].state
-			}
+						self.channels[index].name = data[i].name
+						self.channels[index].recordingArmed = data[i].recording === 'active' ? true : false
+						self.channels[index].state = data[i].state
+					}
 
-			let foundStateVariable = false
-			let channel_name = unescape(data[i]['_name']).replace(' ', '_')
+					let foundStateVariable = false
+					let channel_name = unescape(data[i]['_name']).replace(' ', '_')
 
-			for (let i = 0; i < self.Variables.length; i++) {
-				if (self.Variables[i].name === 'state_' + channel_name) {
-					foundStateVariable = true
+					for (let i = 0; i < self.Variables.length; i++) {
+						if (self.Variables[i].name === 'state_' + channel_name) {
+							foundStateVariable = true
+						}
+					}
+
+					if (!foundStateVariable) {
+						let variableObj = {}
+						variableObj.name = 'state_' + channel_name
+						self.Variables.push(variableObj)
+					}
+
+					if (!foundStateVariable) {
+						//only set the variable definitions again if we added a new variable, this should cut down on unneccessary requests
+						self.setVariableDefinitions(self.Variables)
+					}
+
+					self.setVariable('state_' + channel_name, data[i].state)
+					self.checkFeedbacks('state')
+					
+					if (newChannels) {
+						self.actions() //republish list of actions because of new channel data
+						self.init_feedbacks() //republish list of feedbacks because of new channel data
+					}
 				}
 			}
 
-			if (!foundStateVariable) {
-				let variableObj = {}
-				variableObj.name = 'state_' + channel_name
-				self.Variables.push(variableObj)
+			if (newChannels) {
+				self.actions() //republish list of actions because of new channel data
+				self.init_feedbacks() //republish list of feedbacks because of new channel data
 			}
-
-			if (!foundStateVariable) {
-				//only set the variable definitions again if we added a new variable, this should cut down on unneccessary requests
-				self.setVariableDefinitions(self.Variables)
-			}
-
-			self.setVariable('state_' + channel_name, data[i].state)
-			self.checkFeedbacks('state')
-		}
-
-		if (newChannels) {
-			self.actions() //republish list of actions because of new channel data
-			self.init_feedbacks() //republish list of feedbacks because of new channel data
+		} catch(e) {
+			self.debug(e)
 		}
 	})
 }
@@ -336,15 +356,25 @@ instance.prototype.get_statistics = function (deviceId) {
 	cookieJarAuth.setCookie(cookie1, url)
 
 	self.request.get({ url: url, jar: cookieJarAuth, rejectUnauthorized: false }, function (error, response, body) {
-		let data = JSON.parse(body)
+		try {
+			let data = JSON.parse(body)
 
-		self.setVariable('current_cpu_usage', data.cpu)
-		self.setVariable('current_mem_usage', data.memory)
-		self.setVariable('free_disk_space', data.diskSpace.free)
-		self.setVariable('total_disk_space', data.diskSpace.total)
-		self.setVariable('used_disk_space', data.diskSpace.usedPercent)
-		self.setVariable('network_incoming', data.network.incoming)
-		self.setVariable('network_outgoing', data.network.outgoing)
+			self.setVariable('current_cpu_usage', data.cpu)
+			self.setVariable('current_mem_usage', data.memory)
+			
+			if (data.diskSpace) {
+				self.setVariable('free_disk_space', data.diskSpace.free)
+				self.setVariable('total_disk_space', data.diskSpace.total)
+				self.setVariable('used_disk_space', data.diskSpace.usedPercent)
+			}
+
+			if (data.network) {
+				self.setVariable('network_incoming', data.network.incoming)
+				self.setVariable('network_outgoing', data.network.outgoing)
+			}
+		} catch(e) {
+			self.debug(e)
+		}
 	})
 }
 
@@ -360,7 +390,7 @@ instance.prototype.control_channel = function (channelId, command) {
 	cookieJarAuth.setCookie(cookie1, url)
 
 	self.request.post({ url: url, jar: cookieJarAuth, rejectUnauthorized: false }, function (error, response, body) {
-		let data = JSON.parse(body)
+		//let data = JSON.parse(body)
 	})
 }
 
