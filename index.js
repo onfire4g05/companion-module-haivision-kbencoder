@@ -1,6 +1,7 @@
 // Haivision KB Encoder
 
 const instance_skel = require('../../instance_skel')
+const upgrades = require('./upgrades')
 
 const request = require('request').defaults({
 	rejectUnauthorized: false,
@@ -11,8 +12,28 @@ class instance extends instance_skel {
 		super(system, id, config)
 		this.defineConst('POLLING_INTERVAL', 1000)
 		this.defineConst('REAUTH_TIME', 1200000)
+		this.defineConst('RUN_STATES', [
+			{ id: 'start_pending', label: 'Starting' },
+			{ id: 'running', label: 'Running' },
+			{ id: 'idle', label: 'Idle' },
+			{ id: 'pre_stop_pending', label: 'Preparing to Stop' },
+			{ id: 'pre_stop', label: 'Stopping' },
+			{ id: 'stopped', label: 'Stopped' },
+		])
 
 		this.actions()
+	}
+
+	static GetUpgradeScripts() {
+		return [
+			instance_skel.CreateConvertToBooleanFeedbackUpgradeScript({
+				'state': {
+					'bg': 'bgcolor',
+					'fg': 'color'
+				}
+			}),
+			upgrades.addStateRunning,
+		]
 	}
 
 	init() {
@@ -21,7 +42,7 @@ class instance extends instance_skel {
 		this.polling = null
 		this.channels = []
 		this.channels_list = [{ id: 'null', label: '(no channels found)' }]
-		this.Variables = [
+		this.variables = [
 			{
 				label: 'Current Software Version',
 				name: 'current_version',
@@ -70,7 +91,7 @@ class instance extends instance_skel {
 	}
 
 	init_variables() {
-		this.setVariableDefinitions(this.Variables)
+		this.setVariableDefinitions(this.variables)
 	}
 
 	updateConfig(config) {
@@ -80,49 +101,41 @@ class instance extends instance_skel {
 	}
 
 	init_feedbacks() {
-		// feedbacks
-		let feedbacks = {}
-	
-		feedbacks['state'] = {
-			label: 'Change Button Color If Channel is in Running State',
-			description: 'If selected channel is in running state, set the button to this color.',
-			options: [
-				{
-					type: 'dropdown',
-					label: 'Channel',
-					id: 'channel',
-					choices: this.channels_list,
+		const feedbacks = {
+			state: {
+				type: 'boolean',
+				label: 'Change Button Color If Channel is in Running State',
+				description: 'If selected channel is in running state, set the button to this color.',
+				style: {
+					color: this.rgb(255,255,255),
+					bgcolor: this.rgb(51, 102, 0)
 				},
-				{
-					type: 'colorpicker',
-					label: 'Foreground Color',
-					id: 'fg',
-					default: this.rgb(0, 0, 0),
-				},
-				{
-					type: 'colorpicker',
-					label: 'Background Color',
-					id: 'bg',
-					default: this.rgb(0, 255, 0),
-				},
-			],
-		}
-	
-		this.setFeedbackDefinitions(feedbacks)
-	}
-
-	feedback(feedback, bank) {
-		if (feedback.type === 'state') {
-			for (let i = 0; i < this.channels.length; i++) {
-				if (this.channels[i].id === feedback.options.channel) {
-					if (this.channels[i].state === 'running') {
-						return { color: feedback.options.fg, bgcolor: feedback.options.bg }
+				options: [
+					{
+						type: 'dropdown',
+						label: 'Channel',
+						id: 'channel',
+						choices: this.channels_list
+					},
+					{
+						type: 'dropdown',
+						label: 'State',
+						id: 'state',
+						choices: this.RUN_STATES
 					}
+				],
+				callback: (feedback) => {
+					return this.channels.some(channel => {
+						if (channel.id !== feedback.options.channel) return false
+						if (feedback.options.state === channel.state) return true
+
+						return false
+					})
 				}
 			}
 		}
-	
-		return {}
+
+		this.setFeedbackDefinitions(feedbacks)
 	}
 
 	init_login() {
@@ -240,6 +253,44 @@ class instance extends instance_skel {
 		})
 	}
 	
+	_channelStateVariableName(channel_name) {
+		return 'state_' + unescape(channel_name).replace(' ', '_')
+	}
+
+	/**
+	 * Adds a channel if its new to the channel list
+	 * @param {Object} channel 
+	 */
+	_addChannel(channel) {
+		this.channels.push({
+			id: channel._id,
+			name: channel.name
+		})
+
+		this.variables.push({
+			label: `Channel ${channel.name} state`,
+			name: this._channelStateVariableName(channel.name)
+		})
+
+		this.channels_list.push({
+			id: channel._id,
+			label: unescape(channel.name)
+		})
+	}
+
+	_updateChannel(channel) {
+		const id = this.channels.findIndex(x => x.id = channel._id)
+
+		this.channels[id].recordingArmed = channel.recording === 'active' ? true : false
+		this.channels[id].state = channel.state
+
+		this.setVariable(this._channelStateVariableName(channel.name), channel.state)
+	}
+
+	isChannel(channel_id) {
+		return this.channels.find(x => x.id === channel_id)
+	}
+
 	get_channels(deviceId) {
 		let cmd, url, cookieJarAuth, cookie1
 	
@@ -251,71 +302,32 @@ class instance extends instance_skel {
 	
 		request.get({ url: url, jar: cookieJarAuth }, (error, response, body) => {
 			try {
-				let data = JSON.parse(body)
-	
-				let newChannels = false
-				console.log(data)
-	
-				for (let i = 0; i < data.length; i++) {
-					if (data[i]) {
-						const found = this.channels_list.some((el) => el.id === data[i]['_id'])
-						if (!found) {
-							let channelObj = {}
-							channelObj.id = data[i]['_id']
-							channelObj.name = data[i].name
-							channelObj.recordingArmed = data[i].recording === 'active' ? true : false
-							channelObj.state = data[i].state
-							this.channels.push(channelObj)
-	
-							let channelListObj = {}
-							channelListObj.id = data[i]['_id']
-							channelListObj.label = unescape(data[i].name)
-							this.channels_list.push(channelListObj)
-	
-							newChannels = true //set the bool to true so we can later update actions/feedbacks list
-						} else {
-							//update the channel state
-							let index = this.channels.findIndex((obj) => obj.id == data[i]['_id'])
-	
-							this.channels[index].name = data[i].name
-							this.channels[index].recordingArmed = data[i].recording === 'active' ? true : false
-							this.channels[index].state = data[i].state
-						}
-	
-						let foundStateVariable = false
-						let channel_name = unescape(data[i].name).replace(' ', '_')
-	
-						for (let i = 0; i < this.Variables.length; i++) {
-							if (this.Variables[i].name === 'state_' + channel_name) {
-								foundStateVariable = true
-							}
-						}
-	
-						if (!foundStateVariable) {
-							let variableObj = {}
-							variableObj.name = 'state_' + channel_name
-							this.Variables.push(variableObj)
-						}
-	
-						if (!foundStateVariable) {
-							//only set the variable definitions again if we added a new variable, this should cut down on unneccessary requests
-							this.setVariableDefinitions(this.Variables)
-						}
-	
-						this.setVariable('state_' + channel_name, data[i].state)
-						this.checkFeedbacks('state')
-						
-						if (newChannels) {
-							this.actions() //republish list of actions because of new channel data
-							this.init_feedbacks() //republish list of feedbacks because of new channel data
-						}
+				let channel_list = JSON.parse(body)
+				let new_channels = false
+
+				if (!Array.isArray(channel_list)) {
+					this.debug('Invalid data from server... expected an array')
+					return
+				}
+
+				channel_list.forEach(channel => {
+					if (this.channels.length === 0) this.channels_list = [];
+
+					if (!this.isChannel(channel._id)) {
+						this._addChannel(channel)
+						new_channels = true
 					}
+
+					this._updateChannel(channel)
+				})
+
+				if (new_channels) {
+					this.init_variables(this.variables)
+					this.actions()
+					this.init_feedbacks()
 				}
-	
-				if (newChannels) {
-					this.actions() //republish list of actions because of new channel data
-					this.init_feedbacks() //republish list of feedbacks because of new channel data
-				}
+
+				this.checkFeedbacks('state')
 			} catch(e) {
 				this.debug(e)
 			}
@@ -414,8 +426,6 @@ class instance extends instance_skel {
 	 * Populates the supported actions.
 	 */
 	actions(system) {
-		let self = this
-	
 		this.setActions({
 			start_channel: {
 				label: 'Start a Channel',
@@ -487,14 +497,10 @@ class instance extends instance_skel {
 					this.control_channel(opt.channel, 'stop')
 					break
 				case 'start_channel_all':
-					for (let i = 0; i < this.channels_list.length; i++) {
-						this.control_channel(this.channels_list[i].id, 'start')
-					}
+					this.channels.forEach(x => this.control_channel(x.id, 'start'))
 					break
 				case 'stop_channel_all':
-					for (let i = 0; i < this.channels_list.length; i++) {
-						this.control_channel(this.channels_list[i].id, 'stop')
-					}
+					this.channels.forEach(x => this.control_channel(x.id, 'stop'))
 					break
 				case 'arm_recording':
 					this.control_channel(opt.channel, 'recording/start')
