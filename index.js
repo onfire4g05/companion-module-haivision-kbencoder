@@ -147,9 +147,8 @@ class instance extends instance_skel {
 					password: this.config.password,
 				}
 	
-				let cmd = '/api/session'
-				let url = this.makeUrl(cmd)
-				request.post({ url: url, json: body }, (error, response, body) => {
+				const cmd = '/api/session'
+				request.post({ url: this.makeUrl(cmd), json: body }, (error, response, body) => {
 					// Success
 					this.sessionId = null
 	
@@ -202,16 +201,11 @@ class instance extends instance_skel {
 	}
 	
 	get_variables() {
-		let cmd, url, cookieJarAuth, cookie1
+		let cmd
 	
 		//Get System Level Information
 		cmd = '/api/system?_=' + this.getTime()
-		url = this.makeUrl(cmd)
-		cookieJarAuth = request.jar()
-		cookie1 = request.cookie('sessionID=' + this.sessionId)
-		cookieJarAuth.setCookie(cookie1, url)
-	
-		request.get({ url: url, jar: cookieJarAuth }, (error, response, body) => {
+		request.get(this.this.getRequestOptions(cmd), (error, response, body) => {
 			try {
 				let data = JSON.parse(body)
 	
@@ -229,12 +223,7 @@ class instance extends instance_skel {
 	
 		//Get Device Information
 		cmd = '/api/devices?_=' + this.getTime()
-		url = this.makeUrl(cmd)
-		cookieJarAuth = request.jar()
-		cookie1 = request.cookie('sessionID=' + this.sessionId)
-		cookieJarAuth.setCookie(cookie1, url)
-	
-		request.get({ url: url, jar: cookieJarAuth }, (error, response, body) => {
+		request.get(this.getRequestOptions(cmd), (error, response, body) => {
 			try {
 				let data = JSON.parse(body)
 	
@@ -290,15 +279,8 @@ class instance extends instance_skel {
 	}
 
 	get_channels(deviceId) {
-		let cmd, url, cookieJarAuth, cookie1
-	
-		cmd = `/api/kulabyte/${deviceId}/channels?_=${this.getTime()}`
-		url = this.makeUrl(cmd)
-		cookieJarAuth = request.jar()
-		cookie1 = request.cookie('sessionID=' + this.sessionId)
-		cookieJarAuth.setCookie(cookie1, url)
-	
-		request.get({ url: url, jar: cookieJarAuth }, (error, response, body) => {
+		const cmd = `/api/kulabyte/${deviceId}/channels?_=${this.getTime()}`
+		request.get(this.getRequestOptions(cmd), (error, response, body) => {
 			try {
 				let channel_list = JSON.parse(body)
 				let new_channels = false
@@ -333,15 +315,8 @@ class instance extends instance_skel {
 	}
 	
 	get_statistics(deviceId) {
-		let cmd, url, cookieJarAuth, cookie1
-	
-		cmd = `/api/kulabyte/${deviceId}/encoder/statistics?_=${this.getTime()}`
-		url = this.makeUrl(cmd)
-		cookieJarAuth = request.jar()
-		cookie1 = request.cookie('sessionID=' + this.sessionId)
-		cookieJarAuth.setCookie(cookie1, url)
-	
-		request.get({ url: url, jar: cookieJarAuth }, (error, response, body) => {
+		const cmd = `/api/kulabyte/${deviceId}/encoder/statistics?_=${this.getTime()}`
+		request.get(this.getRequestOptions(cmd), (error, response, body) => {
 			try {
 				let data = JSON.parse(body)
 	
@@ -365,19 +340,24 @@ class instance extends instance_skel {
 	}
 	
 	control_channel(channelId, command) {
-		let cmd, url, cookieJarAuth, cookie1
-	
-		cmd = `/api/kulabyte/${this.deviceId}/channels/${channelId}/${command}`
-		url = this.makeUrl(cmd)
-		cookieJarAuth = request.jar()
-		cookie1 = request.cookie('sessionID=' + this.sessionId)
-		cookieJarAuth.setCookie(cookie1, url)
-	
-		request.post({ url: url, jar: cookieJarAuth }, (error, response, body) => {
+		const cmd = `/api/kulabyte/${this.deviceId}/channels/${channelId}/${command}`
+		request.post(this.getRequestOptions(cmd), (error, response, body) => {
 			//let data = JSON.parse(body)
 		})
 	}
 	
+	getRequestOptions(cmd) {
+		const url = this.makeUrl(cmd)
+		let cookieJarAuth = request.jar()
+		const cookie = request.cookie('sessionID=' + this.sessionId)
+		cookieJarAuth.setCookie(cookie, url)
+
+		return {
+			url: url,
+			jar: cookieJarAuth
+		}
+	}
+
 	/**
 	 * Return config fields for web config.
 	 */
