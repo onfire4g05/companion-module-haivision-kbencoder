@@ -177,11 +177,7 @@ class instance extends instance_skel {
 					this.log('info', 'Session authenticated. Session ID: ' + this.sessionId)
 
 					this.get_variables()
-
-					// this.polling = setInterval(() => {
-					// 	this.get_variables()
-					// }, this.POLLING_INTERVAL)
-
+					
 					this.polling_login = setTimeout(() => {
 						this.log('info', 'Reauthenticating Login Session.')
 						this.init_login()
@@ -242,9 +238,7 @@ class instance extends instance_skel {
 
 	get_variables() {
 		const status_all = [this.getSystemStatus()]
-		// Get System Level Information
-		
-	
+
 		// Get Device Information
 		if (this.deviceId === null) {
 			status_all.push(this.getDeviceStatus())
@@ -272,10 +266,6 @@ class instance extends instance_skel {
 		})
 	}
 	
-	getChannelList() {
-		console.log('getting that list...')
-	}
-
 	_channelStateVariableName(channel_name) {
 		return 'state_' + unescape(channel_name).replace(' ', '_')
 	}
