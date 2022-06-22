@@ -96,6 +96,10 @@ class instance extends instance_skel {
 
 	updateConfig(config) {
 		this.config = config
+		this.reconnect()
+	}
+
+	reconnect() {
 		this.disconnect()
 		this.init()
 	}
@@ -174,9 +178,9 @@ class instance extends instance_skel {
 
 					this.get_variables()
 
-					this.polling = setInterval(() => {
-						this.get_variables()
-					}, this.POLLING_INTERVAL)
+					// this.polling = setInterval(() => {
+					// 	this.get_variables()
+					// }, this.POLLING_INTERVAL)
 
 					this.polling_login = setTimeout(() => {
 						this.log('info', 'Reauthenticating Login Session.')
@@ -192,54 +196,86 @@ class instance extends instance_skel {
 			}
 		})
 	}
+	
+	getSystemStatus() {
+		return new Promise((resolve, reject) => {
+			const cmd = '/api/system'
+			request.get(this.getRequestOptions(cmd), (error, response, body) => {
+				try {
+					let data = JSON.parse(body)
+		
+					if (data.version) {
+						this.setVariable('current_version', data.version.release + ' Build ' + data.version.build)
+					}
+		
+					if (data.uptime) {
+						this.setVariable('uptime', `${data.uptime.days}d${data.uptime.hrs}h${data.uptime.mins}m${data.uptime.secs}s`)
+					}
+					resolve()
+				} catch(e) {
+					this.debug(e)
+					reject()
+				}
+			})
+		})
+	}
 
-	getTime() {
-		var d = new Date()
-		var milliseconds = d.getTime()
-	
-		return milliseconds
+	getDeviceStatus() {
+		return new Promise((resolve, reject) => {
+			const cmd = '/api/devices'
+			request.get(this.getRequestOptions(cmd), (error, response, body) => {
+				try {
+					let data = JSON.parse(body)
+		
+					if (data[0]) {
+						this.deviceId = data[0]['_id']
+						this.setVariable('device_name', data[0].name)
+					}
+					resolve()
+				} catch (e) {
+					this.debug(e)
+					reject()
+				}
+			})
+		})
 	}
-	
+
 	get_variables() {
-		let cmd
+		const status_all = [this.getSystemStatus()]
+		// Get System Level Information
+		
 	
-		//Get System Level Information
-		cmd = '/api/system?_=' + this.getTime()
-		request.get(this.this.getRequestOptions(cmd), (error, response, body) => {
-			try {
-				let data = JSON.parse(body)
-	
-				if (data.version) {
-					this.setVariable('current_version', data.version.release + ' Build ' + data.version.build)
-				}
-	
-				if (data.uptime) {
-					this.setVariable('uptime', `${data.uptime.days}d${data.uptime.hrs}h${data.uptime.mins}m${data.uptime.secs}s`)
-				}
-			} catch(e) {
-				this.debug(e)
-			}
-		})
-	
-		//Get Device Information
-		cmd = '/api/devices?_=' + this.getTime()
-		request.get(this.getRequestOptions(cmd), (error, response, body) => {
-			try {
-				let data = JSON.parse(body)
-	
-				if (data[0]) {
-					this.deviceId = data[0]['_id']
-					this.setVariable('device_name', data[0].name)
-	
-					this.get_channels(this.deviceId)
+		// Get Device Information
+		if (this.deviceId === null) {
+			status_all.push(this.getDeviceStatus())
+		}
+
+		Promise.all(status_all).then(() => {
+			if (this.deviceId === null) {
+				this.polling = setTimeout(this.get_variables.bind(this), this.POLLING_INTERVAL)
+				return
+			} else {
+				Promise.all([
+					this.get_channels(this.deviceId),
 					this.get_statistics(this.deviceId)
-				}
-			} catch (e) {
-				this.debug(e)
+				]).then(() => {
+					this.polling = setTimeout(this.get_variables.bind(this), this.POLLING_INTERVAL)
+				}).catch(() => {
+					this.log('warn', 'Problem during polling channels/stats. Will reconnect to server.')
+					this.reconnect()
+				})
 			}
+		}).catch(() => {
+			// Problem, should probably disconnect and try again
+			this.log('warn', 'Problem during polling system status. Will reconnect to server.')
+			this.reconnect()
 		})
 	}
 	
+	getChannelList() {
+		console.log('getting that list...')
+	}
+
 	_channelStateVariableName(channel_name) {
 		return 'state_' + unescape(channel_name).replace(' ', '_')
 	}
@@ -279,63 +315,71 @@ class instance extends instance_skel {
 	}
 
 	get_channels(deviceId) {
-		const cmd = `/api/kulabyte/${deviceId}/channels?_=${this.getTime()}`
-		request.get(this.getRequestOptions(cmd), (error, response, body) => {
-			try {
-				let channel_list = JSON.parse(body)
-				let new_channels = false
+		return new Promise((resolve, reject) => {
+			const cmd = `/api/kulabyte/${deviceId}/channels`
+			request.get(this.getRequestOptions(cmd), (error, response, body) => {
+				try {
+					let channel_list = JSON.parse(body)
+					let new_channels = false
 
-				if (!Array.isArray(channel_list)) {
-					this.debug('Invalid data from server... expected an array')
-					return
-				}
-
-				channel_list.forEach(channel => {
-					if (this.channels.length === 0) this.channels_list = [];
-
-					if (!this.isChannel(channel._id)) {
-						this._addChannel(channel)
-						new_channels = true
+					if (!Array.isArray(channel_list)) {
+						this.debug('Invalid data from server... expected an array')
+						return
 					}
 
-					this._updateChannel(channel)
-				})
+					channel_list.forEach(channel => {
+						if (this.channels.length === 0) this.channels_list = [];
 
-				if (new_channels) {
-					this.init_variables(this.variables)
-					this.actions()
-					this.init_feedbacks()
+						if (!this.isChannel(channel._id)) {
+							this._addChannel(channel)
+							new_channels = true
+						}
+
+						this._updateChannel(channel)
+					})
+
+					if (new_channels) {
+						this.init_variables(this.variables)
+						this.actions()
+						this.init_feedbacks()
+					}
+
+					this.checkFeedbacks('state')
+					resolve()
+				} catch(e) {
+					this.debug(e)
+					reject()
 				}
-
-				this.checkFeedbacks('state')
-			} catch(e) {
-				this.debug(e)
-			}
-		})
+			})
+		});
 	}
 	
 	get_statistics(deviceId) {
-		const cmd = `/api/kulabyte/${deviceId}/encoder/statistics?_=${this.getTime()}`
-		request.get(this.getRequestOptions(cmd), (error, response, body) => {
-			try {
-				let data = JSON.parse(body)
-	
-				this.setVariable('current_cpu_usage', data.cpu)
-				this.setVariable('current_mem_usage', data.memory)
-				
-				if (data.diskSpace) {
-					this.setVariable('free_disk_space', data.diskSpace.free)
-					this.setVariable('total_disk_space', data.diskSpace.total)
-					this.setVariable('used_disk_space', data.diskSpace.usedPercent)
+		return new Promise((resolve, reject) => {
+			const cmd = `/api/kulabyte/${deviceId}/encoder/statistics`
+			request.get(this.getRequestOptions(cmd), (error, response, body) => {
+				try {
+					let data = JSON.parse(body)
+		
+					this.setVariable('current_cpu_usage', data.cpu)
+					this.setVariable('current_mem_usage', data.memory)
+					
+					if (data.diskSpace) {
+						this.setVariable('free_disk_space', data.diskSpace.free)
+						this.setVariable('total_disk_space', data.diskSpace.total)
+						this.setVariable('used_disk_space', data.diskSpace.usedPercent)
+					}
+		
+					if (data.network) {
+						this.setVariable('network_incoming', data.network.incoming)
+						this.setVariable('network_outgoing', data.network.outgoing)
+					}
+					resolve()
+				} catch(e) {
+					this.debug(e)
+					reject()
 				}
-	
-				if (data.network) {
-					this.setVariable('network_incoming', data.network.incoming)
-					this.setVariable('network_outgoing', data.network.outgoing)
-				}
-			} catch(e) {
-				this.debug(e)
-			}
+			})
 		})
 	}
 	
