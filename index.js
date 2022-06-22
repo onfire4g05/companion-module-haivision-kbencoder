@@ -139,60 +139,60 @@ class instance extends instance_skel {
 	}
 
 	init_login() {
-		if (this.config.username && this.config.password) {
-			if (this.config.username !== '' && this.config.password !== '') {
-				//username and password not blank, so initiate login session
-				let body = {
-					username: this.config.username,
-					password: this.config.password,
-				}
-	
-				const cmd = '/api/session'
-				request.post({ url: this.makeUrl(cmd), json: body }, (error, response, body) => {
-					// Success
-					this.sessionId = null
-	
-					try {
-						let cookies = response.headers['set-cookie']
-						let cookiesString = cookies.toString()
-						let cookiesArray = cookiesString.split(';')
-	
-						for (let i = 0; i < cookiesArray.length; i++) {
-							if (cookiesArray[i].indexOf('sessionID=') > -1) {
-								//this is the session id that we want
-								let values = cookiesArray[i].split('=')
-								this.sessionId = values[1]
-								break
-							}
-						}
-	
-						if (this.sessionId !== null) {
-							this.status(this.STATUS_OK)
-							this.log('info', 'Session authenticated. Session ID: ' + this.sessionId)
-	
-							this.get_variables()
-	
-							this.polling = setInterval(() => {
-								this.get_variables()
-							}, this.POLLING_INTERVAL)
-	
-							this.polling_login = setTimeout(() => {
-								this.log('info', 'Reauthenticating Login Session.')
-								this.init_login()
-							}, this.REAUTH_TIME)
-						} else {
-							this.status(this.STATUS_ERROR)
-							this.log('error', 'Login error: Session ID not returned.')
-						}
-					} catch (error) {
-						this.status(this.STATUS_ERROR)
-						this.log('error', 'Login error parsing cookies: ' + error)
-					}
-				})
-			}
+		if(!('username' in this.config) || !('password' in this.config) || this.config.username === '' || this.config.password === '') {
+			return
 		}
+
+		//username and password not blank, so initiate login session
+		const body = {
+			username: this.config.username,
+			password: this.config.password,
+		}
+
+		const cmd = '/api/session'
+		request.post({ url: this.makeUrl(cmd), json: body }, (error, response, body) => {
+			// Success
+			this.sessionId = null
+
+			try {
+				let cookies = response.headers['set-cookie']
+				let cookiesString = cookies.toString()
+				let cookiesArray = cookiesString.split(';')
+
+				for (let i = 0; i < cookiesArray.length; i++) {
+					if (cookiesArray[i].indexOf('sessionID=') > -1) {
+						//this is the session id that we want
+						let values = cookiesArray[i].split('=')
+						this.sessionId = values[1]
+						break
+					}
+				}
+
+				if (this.sessionId !== null) {
+					this.status(this.STATUS_OK)
+					this.log('info', 'Session authenticated. Session ID: ' + this.sessionId)
+
+					this.get_variables()
+
+					this.polling = setInterval(() => {
+						this.get_variables()
+					}, this.POLLING_INTERVAL)
+
+					this.polling_login = setTimeout(() => {
+						this.log('info', 'Reauthenticating Login Session.')
+						this.init_login()
+					}, this.REAUTH_TIME)
+				} else {
+					this.status(this.STATUS_ERROR)
+					this.log('error', 'Login error: Session ID not returned.')
+				}
+			} catch (error) {
+				this.status(this.STATUS_ERROR)
+				this.log('error', 'Login error parsing cookies: ' + error)
+			}
+		})
 	}
-	
+
 	getTime() {
 		var d = new Date()
 		var milliseconds = d.getTime()
