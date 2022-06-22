@@ -202,8 +202,6 @@ class instance extends instance_skel {
 	}
 	
 	get_variables() {
-		let self = this
-	
 		let cmd, url, cookieJarAuth, cookie1
 	
 		//Get System Level Information
@@ -335,8 +333,6 @@ class instance extends instance_skel {
 	}
 	
 	get_statistics(deviceId) {
-		let self = this
-	
 		let cmd, url, cookieJarAuth, cookie1
 	
 		cmd = `/api/kulabyte/${deviceId}/encoder/statistics?_=${this.getTime()}`
@@ -369,8 +365,6 @@ class instance extends instance_skel {
 	}
 	
 	control_channel(channelId, command) {
-		let self = this
-	
 		let cmd, url, cookieJarAuth, cookie1
 	
 		cmd = `/api/kulabyte/${this.deviceId}/channels/${channelId}/${command}`
@@ -388,8 +382,6 @@ class instance extends instance_skel {
 	 * Return config fields for web config.
 	 */
 	config_fields() {
-		let self = this
-	
 		return [
 			{
 				type: 'text',
