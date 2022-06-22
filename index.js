@@ -292,7 +292,7 @@ class instance extends instance_skel {
 	}
 
 	_updateChannel(channel) {
-		const id = this.channels.findIndex(x => x.id = channel._id)
+		const id = this.channels.findIndex(x => x.id === channel._id)
 
 		this.channels[id].recordingArmed = channel.recording === 'active' ? true : false
 		this.channels[id].state = channel.state
