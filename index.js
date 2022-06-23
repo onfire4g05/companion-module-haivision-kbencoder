@@ -12,6 +12,7 @@ class instance extends instance_skel {
 		super(system, id, config)
 		this.defineConst('POLLING_INTERVAL', 1000)
 		this.defineConst('REAUTH_TIME', 1200000)
+		this.defineConst('RECONNECT_TIMEOUT', 2500) // Time to wait on errors before attempting to reconnect to the server
 		this.defineConst('RUN_STATES', [
 			{ id: 'start_pending', label: 'Starting' },
 			{ id: 'running', label: 'Running' },
@@ -99,9 +100,9 @@ class instance extends instance_skel {
 		this.reconnect()
 	}
 
-	reconnect() {
+	reconnect(timeout = 0) {
 		this.disconnect()
-		this.init()
+		this.polling = setTimeout(this.init.bind(this), timeout)
 	}
 
 	init_feedbacks() {
@@ -255,14 +256,14 @@ class instance extends instance_skel {
 				]).then(() => {
 					this.polling = setTimeout(this.get_variables.bind(this), this.POLLING_INTERVAL)
 				}).catch(() => {
-					this.log('warn', 'Problem during polling channels/stats. Will reconnect to server.')
-					this.reconnect()
+					this.log('warn', 'Problem during polling channels/stats. Will reconnect to server soon.')
+					this.reconnect(this.RECONNECT_TIMEOUT)
 				})
 			}
 		}).catch(() => {
 			// Problem, should probably disconnect and try again
-			this.log('warn', 'Problem during polling system status. Will reconnect to server.')
-			this.reconnect()
+			this.log('warn', 'Problem during polling system status. Will reconnect to server soon.')
+			this.reconnect(this.RECONNECT_TIMEOUT)
 		})
 	}
 	
