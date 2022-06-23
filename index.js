@@ -20,8 +20,13 @@ class instance extends instance_skel {
 			{ id: 'running', label: 'Running' },
 			{ id: 'idle', label: 'Idle' },
 			{ id: 'pre_stop_pending', label: 'Preparing to Stop' },
-			{ id: 'pre_stop', label: 'Stopping' },
-			{ id: 'stopped', label: 'Stopped' },
+			{ id: 'stop_pending', label: 'Stopping' },
+		])
+		this.defineConst('RUN_STATUS', [
+			{ id: '', label: 'Unknown/Inactive' },
+			{ id: '1', label: 'Warning' },
+			{ id: '2', label: 'Error' },
+			{ id: '3', label: 'OK' },
 		])
 
 		this.actions()
@@ -107,12 +112,19 @@ class instance extends instance_skel {
 		this.polling = setTimeout(this.init.bind(this), timeout)
 	}
 
+	getStatusName(status) {
+		let status_obj = this.RUN_STATUS.find(x => x.id == status)
+		if(!status_obj) status_obj = this.RUN_STATUS.find(x => x.id == '')
+		
+		return status_obj.label
+	}
+
 	init_feedbacks() {
 		const feedbacks = {
 			state: {
 				type: 'boolean',
-				label: 'Change Button Color If Channel is in Running State',
-				description: 'If selected channel is in running state, set the button to this color.',
+				label: 'Channel state',
+				description: 'This feedback is true if selected channel is in a specified state.',
 				style: {
 					color: this.rgb(255,255,255),
 					bgcolor: this.rgb(51, 102, 0)
@@ -135,6 +147,68 @@ class instance extends instance_skel {
 					return this.channels.some(channel => {
 						if (channel.id !== feedback.options.channel) return false
 						if (feedback.options.state === channel.state) return true
+
+						return false
+					})
+				}
+			},
+			input_status: {
+				type: 'boolean',
+				label: 'Channel input status',
+				description: 'This feedback is true if selected channel is in a specified status.',
+				style: {
+					color: this.rgb(255,255,255),
+					bgcolor: this.rgb(51, 102, 0)
+				},
+				options: [
+					{
+						type: 'dropdown',
+						label: 'Channel',
+						id: 'channel',
+						choices: this.channels_list
+					},
+					{
+						type: 'dropdown',
+						label: 'Status',
+						id: 'status',
+						choices: this.RUN_STATUS
+					}
+				],
+				callback: (feedback) => {
+					return this.channels.some(channel => {
+						if (channel.id !== feedback.options.channel) return false
+						if (feedback.options.status == channel.input_status) return true
+
+						return false
+					})
+				}
+			},
+			output_status: {
+				type: 'boolean',
+				label: 'Channel output status',
+				description: 'This feedback is true if selected channel is in a specified status.',
+				style: {
+					color: this.rgb(255,255,255),
+					bgcolor: this.rgb(51, 102, 0)
+				},
+				options: [
+					{
+						type: 'dropdown',
+						label: 'Channel',
+						id: 'channel',
+						choices: this.channels_list
+					},
+					{
+						type: 'dropdown',
+						label: 'Status',
+						id: 'status',
+						choices: this.RUN_STATUS
+					}
+				],
+				callback: (feedback) => {
+					return this.channels.some(channel => {
+						if (channel.id !== feedback.options.channel) return false
+						if (feedback.options.status == channel.output_status) return true
 
 						return false
 					})
@@ -280,8 +354,8 @@ class instance extends instance_skel {
 		})
 	}
 	
-	_channelStateVariableName(channel_name) {
-		return 'state_' + unescape(channel_name).replace(' ', '_')
+	_channelStateVariableName(channel_name, name = 'state') {
+		return name + '_' + unescape(channel_name).replace(' ', '_')
 	}
 
 	/**
@@ -297,6 +371,18 @@ class instance extends instance_skel {
 		this.variables.push({
 			label: `Channel ${channel.name} state`,
 			name: this._channelStateVariableName(channel.name)
+		}, {
+			label: `Channel ${channel.name} output status`,
+			name: this._channelStateVariableName(channel.name, 'output')
+		}, {
+			label: `Channel ${channel.name} output info`,
+			name: this._channelStateVariableName(channel.name, 'output_info')
+		}, {
+			label: `Channel ${channel.name} input status`,
+			name: this._channelStateVariableName(channel.name, 'input')
+		}, {
+			label: `Channel ${channel.name} input info`,
+			name: this._channelStateVariableName(channel.name, 'input_info')
 		})
 
 		this.channels_list.push({
@@ -310,8 +396,16 @@ class instance extends instance_skel {
 
 		this.channels[id].recordingArmed = channel.recording === 'active' ? true : false
 		this.channels[id].state = channel.state
+		this.channels[id].output_status = 'outputstate' in channel ? channel.outputstate : '' // case is correct here!
+		this.channels[id].input_status = 'inputstate' in channel ? channel.inputstate : ''
 
 		this.setVariable(this._channelStateVariableName(channel.name), channel.state)
+
+		this.setVariable(this._channelStateVariableName(channel.name, 'output'), this.getStatusName(this.channels[id].output_status))
+		this.setVariable(this._channelStateVariableName(channel.name, 'output_info'), 'outputStateInfo' in channel ? channel.outputStateInfo : '')
+		
+		this.setVariable(this._channelStateVariableName(channel.name, 'input'), this.getStatusName(this.channels[id].input_status))
+		this.setVariable(this._channelStateVariableName(channel.name, 'input_info'), 'inputStateInfo' in channel ? channel.inputStateInfo : '')
 	}
 
 	isChannel(channel_id) {
@@ -349,6 +443,8 @@ class instance extends instance_skel {
 					}
 
 					this.checkFeedbacks('state')
+					this.checkFeedbacks('input_status')
+					this.checkFeedbacks('output_status')
 					resolve()
 				} catch(e) {
 					this.debug(e)
