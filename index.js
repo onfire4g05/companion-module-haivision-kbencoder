@@ -12,8 +12,9 @@ class instance extends instance_skel {
 		super(system, id, config)
 		this.defineConst('POLLING_INTERVAL', 1000)
 		this.defineConst('REAUTH_TIME', 1200000)
-		this.defineConst('RECONNECT_TIMEOUT', 2500) // Time to wait on errors before attempting to reconnect to the server
-		this.defineConst('LOGIN_TIMEOUT', 5000)
+		this.defineConst('TIMEOUT_RECONNECT', 2500) // Time to wait on errors before attempting to reconnect to the server
+		this.defineConst('TIMEOUT_LOGIN', 5000) // Timeout for login
+		this.defineConst('TIMEOUT_GENERAL', 7000) // Timeout for http status calls
 		this.defineConst('LOGIN_RETRY', 5) // Time, in seconds, to wait for retry when a login fails
 		this.defineConst('RUN_STATES', [
 			{ id: 'start_pending', label: 'Starting' },
@@ -235,7 +236,7 @@ class instance extends instance_skel {
 		request.post({
 			url: this.makeUrl(cmd),
 			json: body,
-			timeout: this.LOGIN_TIMEOUT,
+			timeout: this.TIMEOUT_LOGIN,
 		}, (error, response, body) => {
 			if(typeof response !== 'object' || !('statusCode' in response) || response.statusCode !== 200) {
 				this.log('warn', `Could not connect to server... will retry in ${this.LOGIN_RETRY} seconds`)
@@ -344,13 +345,13 @@ class instance extends instance_skel {
 					this.polling = setTimeout(this.get_variables.bind(this), this.POLLING_INTERVAL)
 				}).catch(() => {
 					this.log('warn', 'Problem during polling channels/stats. Will reconnect to server soon.')
-					this.reconnect(this.RECONNECT_TIMEOUT)
+					this.reconnect(this.TIMEOUT_RECONNECT)
 				})
 			}
 		}).catch(() => {
 			// Problem, should probably disconnect and try again
 			this.log('warn', 'Problem during polling system status. Will reconnect to server soon.')
-			this.reconnect(this.RECONNECT_TIMEOUT)
+			this.reconnect(this.TIMEOUT_RECONNECT)
 		})
 	}
 	
@@ -498,7 +499,8 @@ class instance extends instance_skel {
 
 		return {
 			url: url,
-			jar: cookieJarAuth
+			jar: cookieJarAuth,
+			timeout: this.TIMEOUT_GENERAL
 		}
 	}
 
