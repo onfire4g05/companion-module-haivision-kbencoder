@@ -13,6 +13,8 @@ class instance extends instance_skel {
 		this.defineConst('POLLING_INTERVAL', 1000)
 		this.defineConst('REAUTH_TIME', 1200000)
 		this.defineConst('RECONNECT_TIMEOUT', 2500) // Time to wait on errors before attempting to reconnect to the server
+		this.defineConst('LOGIN_TIMEOUT', 5000)
+		this.defineConst('LOGIN_RETRY', 5) // Time, in seconds, to wait for retry when a login fails
 		this.defineConst('RUN_STATES', [
 			{ id: 'start_pending', label: 'Starting' },
 			{ id: 'running', label: 'Running' },
@@ -154,8 +156,19 @@ class instance extends instance_skel {
 			password: this.config.password,
 		}
 
+		this.status(this.STATUS_UNKNOWN, 'Logging in')
 		const cmd = '/api/session'
-		request.post({ url: this.makeUrl(cmd), json: body }, (error, response, body) => {
+		request.post({
+			url: this.makeUrl(cmd),
+			json: body,
+			timeout: this.LOGIN_TIMEOUT,
+		}, (error, response, body) => {
+			if(typeof response !== 'object' || !('statusCode' in response) || response.statusCode !== 200) {
+				this.log('warn', `Could not connect to server... will retry in ${this.LOGIN_RETRY} seconds`)
+				this.status(this.STATUS_ERROR)
+				this.polling_login = setTimeout(this.init_login.bind(this), this.LOGIN_RETRY * 1000)
+				return
+			}
 			// Success
 			this.sessionId = null
 
