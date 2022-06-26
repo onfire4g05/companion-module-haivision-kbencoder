@@ -646,8 +646,8 @@ class instance extends instance_skel {
 	}
 
 	disconnect() {
-		clearInterval(this.polling)
-		clearInterval(this.polling_login)
+		clearTimeout(this.polling)
+		clearTimeout(this.polling_login)
 	}
 
 	destroy() {
