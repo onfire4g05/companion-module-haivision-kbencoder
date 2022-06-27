@@ -176,12 +176,8 @@ class instance extends instance_skel {
 					}
 				],
 				callback: (feedback) => {
-					return this.channels.some(channel => {
-						if (channel.id !== feedback.options.channel) return false
-						if (feedback.options.status == channel.input_status) return true
-
-						return false
-					})
+					return this.channels.some(channel => channel.id === feedback.options.channel
+						&& feedback.options.status == channel.input_status)
 				}
 			},
 			output_status: {
@@ -207,12 +203,8 @@ class instance extends instance_skel {
 					}
 				],
 				callback: (feedback) => {
-					return this.channels.some(channel => {
-						if (channel.id !== feedback.options.channel) return false
-						if (feedback.options.status == channel.output_status) return true
-
-						return false
-					})
+					return this.channels.some(channel => channel.id === feedback.options.channel
+						&& feedback.options.status == channel.output_status)
 				}
 			}
 		}
