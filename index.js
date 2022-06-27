@@ -206,7 +206,37 @@ class instance extends instance_skel {
 					return this.channels.some(channel => channel.id === feedback.options.channel
 						&& feedback.options.status == channel.output_status)
 				}
-			}
+			},
+			armed: {
+				type: 'boolean',
+				label: 'Channel armed',
+				description: 'This feedback is true based on armed status.',
+				style: {
+					color: this.rgb(255,255,255),
+					bgcolor: this.rgb(51, 102, 0)
+				},
+				options: [
+					{
+						type: 'dropdown',
+						label: 'Channel',
+						id: 'channel',
+						choices: this.channels_list
+					},
+					{
+						type: 'dropdown',
+						label: 'Armed',
+						id: 'armed',
+						choices: [
+							{ id: 'Yes', label: 'Yes' },
+							{ id: 'No', label: 'No' },
+						]
+					}
+				],
+				callback: (feedback) => {
+					return this.channels.some(channel => channel.id === feedback.options.channel
+						&& feedback.options.armed === channel.recording_armed)
+				}
+			},
 		}
 
 		this.setFeedbackDefinitions(feedbacks)
@@ -376,6 +406,9 @@ class instance extends instance_skel {
 		}, {
 			label: `Channel ${channel.name} input info`,
 			name: this._channelStateVariableName(channel.name, 'input_info')
+		}, {
+			label: `Channel ${channel.name} is armed`,
+			name: this._channelStateVariableName(channel.name, 'armed')
 		})
 
 		this.channels_list.push({
@@ -387,7 +420,7 @@ class instance extends instance_skel {
 	_updateChannel(channel) {
 		const id = this.channels.findIndex(x => x.id === channel._id)
 
-		this.channels[id].recordingArmed = channel.recording === 'active' ? true : false
+		this.channels[id].recording_armed = channel.recording === 'active' ? 'Yes' : 'No'
 		this.channels[id].state = channel.state
 		this.channels[id].output_status = 'outputstate' in channel ? channel.outputstate : '' // case is correct here!
 		this.channels[id].input_status = 'inputstate' in channel ? channel.inputstate : ''
@@ -399,6 +432,8 @@ class instance extends instance_skel {
 		
 		this.setVariable(this._channelStateVariableName(channel.name, 'input'), this.getStatusName(this.channels[id].input_status))
 		this.setVariable(this._channelStateVariableName(channel.name, 'input_info'), 'inputStateInfo' in channel ? channel.inputStateInfo : '')
+
+		this.setVariable(this._channelStateVariableName(channel.name, 'armed'), this.channels[id].recording_armed)
 	}
 
 	isChannel(channel_id) {
@@ -438,6 +473,7 @@ class instance extends instance_skel {
 					this.checkFeedbacks('state')
 					this.checkFeedbacks('input_status')
 					this.checkFeedbacks('output_status')
+					this.checkFeedbacks('armed')
 					resolve()
 				} catch(e) {
 					this.debug(e)
