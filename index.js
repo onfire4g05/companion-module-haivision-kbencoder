@@ -106,7 +106,7 @@ class HaivisionKbEncoderInstance extends InstanceBase {
 				type: 'boolean',
 				label: 'Channel state',
 				description: 'This feedback is true if selected channel is in a specified state.',
-				style: {
+				defaultStyle: {
 					color: combineRgb(255,255,255),
 					bgcolor: combineRgb(51, 102, 0)
 				},
@@ -137,7 +137,7 @@ class HaivisionKbEncoderInstance extends InstanceBase {
 				type: 'boolean',
 				label: 'Channel input status',
 				description: 'This feedback is true if selected channel is in a specified status.',
-				style: {
+				defaultStyle: {
 					color: combineRgb(255,255,255),
 					bgcolor: combineRgb(51, 102, 0)
 				},
@@ -164,7 +164,7 @@ class HaivisionKbEncoderInstance extends InstanceBase {
 				type: 'boolean',
 				label: 'Channel output status',
 				description: 'This feedback is true if selected channel is in a specified status.',
-				style: {
+				defaultStyle: {
 					color: combineRgb(255,255,255),
 					bgcolor: combineRgb(51, 102, 0)
 				},
@@ -191,7 +191,7 @@ class HaivisionKbEncoderInstance extends InstanceBase {
 				type: 'boolean',
 				label: 'Channel armed',
 				description: 'This feedback is true based on armed status.',
-				style: {
+				defaultStyle: {
 					color: combineRgb(255,255,255),
 					bgcolor: combineRgb(51, 102, 0)
 				},
